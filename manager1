@@ -1,0 +1,188 @@
+import socket
+import json
+from DataHandler import DataHandler
+
+def edit_file(file_path, summer_up_information_to_use):
+    agents = "['yossi','dani','eran']"
+    incoming_values_data = []
+    outgoing_values_data = []
+    countries_values_data = []
+    popular_ips_value_data = []
+    apps_value_data = []
+    ports_value_data = []
+    alerts = summer_up_information_to_use['alerts']
+
+    # Incoming:
+    for i in summer_up_information_to_use['incoming_traffic_per_agent_len']:
+        incoming_values_data.append(summer_up_information_to_use['incoming_traffic_per_agent_len'][i])
+
+    # Outgoing:
+    for i in summer_up_information_to_use['outgoing_traffic_per_agent_len']:
+        outgoing_values_data.append(summer_up_information_to_use['outgoing_traffic_per_agent_len'][i])
+
+    # Countries keys (names of countries):
+    countries_names_keys = list(summer_up_information_to_use['country'].keys())
+
+    # Countries values:
+    for i in summer_up_information_to_use['country']:
+        countries_values_data.append(summer_up_information_to_use['country'][i])
+
+    # Popular IPs keys (the IPs):
+    popular_ips_keys = list(summer_up_information_to_use['ip'].keys())
+
+    # Appearance of popular IPs (values):
+    for i in summer_up_information_to_use['ip']:
+        popular_ips_value_data.append(summer_up_information_to_use['ip'][i])
+
+    # Popular apps keys:
+    apps_keys = list(summer_up_information_to_use['app'].keys())
+
+    # Popular apps values:
+    for i in summer_up_information_to_use['app']:
+        apps_value_data.append(summer_up_information_to_use['app'][i])
+
+    # Popular ports keys:
+    ports_keys = list(summer_up_information_to_use['port'].keys())
+
+    # Popular ports values:
+    for i in summer_up_information_to_use['port']:
+        ports_value_data.append(summer_up_information_to_use['port'][i])
+
+
+    #Read the current content of the file into file_lines list
+
+    file = open(file_path, "r")
+    file_lines = file.readlines()
+
+        # Update the relevant lines in the file
+    file_lines[152] = "                                labels: " + agents
+    file_lines[156] = "                                data: " + str(incoming_values_data)
+    file_lines[180] = "                                labels: " + agents
+    file_lines[184] = "                                data: " + str(outgoing_values_data)
+    file_lines[225] = "                                labels: " + str(countries_names_keys)
+    file_lines[229] = "                                data: " + str(countries_values_data)
+    file_lines[272] = "                                labels: " + str(popular_ips_keys)
+    file_lines[276] = "                                data: " + str(popular_ips_value_data)
+    file_lines[317] = "                                labels: " + str(apps_keys)
+    file_lines[321] = "                                data: " + str(apps_value_data)
+    file_lines[364] = "                                labels: " + str(ports_keys)
+    file_lines[368] = "                                data: " + str(ports_value_data)
+    file_lines[403] = str(alerts)
+
+    file_writing = open(file_path,"w")
+    file_file = file_writing.writelines(file_lines)
+
+def processing_data_for_every_packet(listening_sock,all_ip,apps,countries,names_in_the_system,incoming_traffic_per_agent_len,outgoing_traffic_per_agent_len,ports,BLACKLIST,alerts,FILE_PATH):
+    while True:
+        #increasing buffer:
+
+        client_data, client_address = listening_sock.recvfrom(4096)
+        try:
+            #getting data from socket:
+            data_in_dictionary = json.loads(client_data.decode('utf-8'))
+            report_list = []
+
+            for info in data_in_dictionary:
+                summer_up_info = DataHandler()
+
+                #Traffic per IP:
+                ip_address = info["ip"]
+                #dict of all the ip:
+                if ip_address in all_ip:
+                    all_ip[ip_address] += 1
+                else:
+                    #new ip, first time showing up
+                    all_ip[ip_address] = 1
+
+                #Traffic Per App:
+                app = info["app"]
+                #if app is already familiar(showed up before):
+                if app in apps:
+                    apps[app] += 1
+                else:
+                    #new app, first time showing up
+                    apps[app] = 1
+
+                #Traffic Per Country:
+                country = info["country"]
+                if country in countries:
+                    #if country is already familiar(showed up before):
+                    countries[country] += 1
+                else:
+                    #new country, first time showing up
+                    countries[country] = 1
+
+                #checking if the packet in incoming or outgoing
+                if "is_incoming" in info:
+                    is_incoming = info["is_incoming"]
+                else:
+                    is_incoming = False
+
+                #check if the ip is one of the agents:
+                if ip_address in names_in_the_system:
+                    employee_name = names_in_the_system[ip_address]
+                else:
+                    employee_name = ip_address
+
+                #update len of packet ingoing/outgoing for every agent:
+                if is_incoming:
+                    if employee_name in ['dani','eran','yossi']:
+                        incoming_traffic_per_agent_len[employee_name] += info["len of packet"]
+
+                else:
+                    if employee_name in ['dani','eran','yossi']:
+                        outgoing_traffic_per_agent_len[employee_name] += info["len of packet"]
+                #Traffic Per Port:
+                port = info["port"]
+                if port in ports:
+                    #add 1 to this port(counter)
+                    ports[port] += 1
+                else:
+                    #new port, first time showing up
+                    ports[port] = 1
+
+                #alerts:
+                if ip_address in BLACKLIST:
+                    if employee_name in ['dani', 'eran', 'yossi']:
+                        alerts.append([employee_name, ip_address])
+
+
+            summer_up_info.add_packet_data(all_ip,incoming_traffic_per_agent_len,outgoing_traffic_per_agent_len,ports,apps,countries,alerts)
+            print(summer_up_info.get_packet_data())
+            summer_up_information_to_use = summer_up_info.get_packet_data()
+            file_edited = edit_file(FILE_PATH,summer_up_information_to_use)
+        except json.JSONDecodeError:
+            print("received data is not valid JSON")
+
+
+def main():
+    LISTENING_PORT = 1234
+    BLACKLIST = {"1.2.3.4": "facebook", "95.1.2.2": "twitter", "23.35.229.129": "ynet", "142.251.37.78": "youtube"}
+    names_in_the_system = {"192.168.0.1": "eran", "192.168.1.1": "yossi", "152.23.12.191": "dani"}
+    #create socket:
+    listening_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        listening_sock.bind(('127.0.0.1', LISTENING_PORT))
+        print("server is listening on port ...", LISTENING_PORT)
+
+        summer_up_info = DataHandler()
+        FILE_PATH = r"C:\Users\Cyber_Mamriot\PycharmProjects\Milestone4\template (6)\template\html\template.html"
+        #initilaizing:
+        alerts = []
+        all_ip = {}
+        ports = {}
+        incoming_traffic_per_agent_len = {'yossi': 0, 'dani': 0, 'eran': 0}
+        outgoing_traffic_per_agent_len = {'yossi': 0, 'dani': 0, 'eran': 0}
+        apps = {}
+        countries = {}
+        processing_data_for_every_packet(listening_sock,all_ip,apps,countries,names_in_the_system,incoming_traffic_per_agent_len,outgoing_traffic_per_agent_len,ports,BLACKLIST,alerts,FILE_PATH)
+
+
+    except OSError:
+        print("OSError")
+    finally:
+        listening_sock.close()
+
+
+if __name__ == '__main__':
+    main()
